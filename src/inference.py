@@ -26,8 +26,8 @@ def is_model_loaded() -> bool:
 
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
     """
-    Validate, open, resize to (224, 224) RGB, and apply MobileNetV2 preprocessing.
-    MobileNetV2 expects pixel values in [-1, 1].
+    Validate, open, and resize to (224, 224) RGB with float32 [0, 255] values.
+    The Keras model pipeline already includes tf.keras.applications.mobilenet_v2.preprocess_input.
     """
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -36,8 +36,6 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
 
     image = image.resize(IMAGE_SIZE)
     img_array = np.array(image, dtype=np.float32)
-    # MobileNetV2 preprocessing: (x / 127.5) - 1.0
-    img_array = (img_array / 127.5) - 1.0
     img_array = np.expand_dims(img_array, axis=0)
     return img_array
 

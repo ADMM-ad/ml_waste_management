@@ -1,12 +1,12 @@
-WASTE CLASSIFICATION REPORT (MobileNetV2)
-Test Accuracy: 100.00%
+WASTE CLASSIFICATION REPORT (MobileNetV2 on Real-World Photos)
+Test Accuracy: 96.67%
 
                precision    recall  f1-score   support
 
-Organic Waste     1.0000    1.0000    1.0000        15
-Plastic Waste     1.0000    1.0000    1.0000        15
-  Paper Waste     1.0000    1.0000    1.0000        15
+Organic Waste     1.0000    0.9833    0.9916        60
+Plastic Waste     0.9500    0.9500    0.9500        60
+  Paper Waste     0.9508    0.9667    0.9587        60
 
-     accuracy                         1.0000        45
-    macro avg     1.0000    1.0000    1.0000        45
- weighted avg     1.0000    1.0000    1.0000        45
+     accuracy                         0.9667       180
+    macro avg     0.9669    0.9667    0.9668       180
+ weighted avg     0.9669    0.9667    0.9668       180

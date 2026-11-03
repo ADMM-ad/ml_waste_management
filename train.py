@@ -1,6 +1,7 @@
 """
 train.py
-End-to-end training and evaluation script for MobileNetV2 Waste Classification.
+End-to-end training and evaluation script for MobileNetV2 Waste Classification
+trained on real-world garbage dataset (Organic, Plastic, Paper).
 Outputs:
   - evaluation/training_history.png
   - evaluation/confusion_matrix.png
@@ -45,8 +46,8 @@ def build_model():
 
     data_augmentation = keras.Sequential([
         layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.15),
-        layers.RandomZoom(0.1),
+        layers.RandomRotation(0.2),
+        layers.RandomZoom(0.15),
         layers.RandomTranslation(0.1, 0.1),
     ], name="data_augmentation")
 
@@ -56,17 +57,18 @@ def build_model():
     x = tf.keras.applications.mobilenet_v2.preprocess_input(x)
     x = base_model(x, training=False)
     x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dropout(0.2)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.3)(x)
     x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)
+    x = layers.Dropout(0.3)(x)
     outputs = layers.Dense(NUM_CLASSES, activation='softmax')(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs, name="WasteClassifierMobileNetV2")
-    return model
+    return model, base_model
 
 def main():
     print("=" * 60)
-    print("STARTING WASTE CLASSIFIER TRAINING & EVALUATION PIPELINE")
+    print("STARTING WASTE CLASSIFIER TRAINING ON REAL-WORLD DATASET")
     print("=" * 60)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -77,10 +79,10 @@ def main():
     test_dir = DATASET_DIR / "test"
 
     if not train_dir.exists():
-        print(f"Dataset directory not found at {train_dir}. Run prepare_dataset.py first!")
+        print(f"Dataset directory not found at {train_dir}. Run import_real_dataset.py first!")
         sys.exit(1)
 
-    batch_size = 16
+    batch_size = 32
 
     print("\n1. Loading datasets...")
     train_ds = tf.keras.utils.image_dataset_from_directory(
@@ -114,16 +116,16 @@ def main():
         shuffle=False
     )
 
-    # Prefetch for performance
-    AUTOTUNE = tf.data.AUTOTUNE
-    train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-    val_ds = val_ds.prefetch(buffer_size=AUTOTUNE)
-    test_ds = test_ds.prefetch(buffer_size=AUTOTUNE)
+    # Performance optimization
+    autotune = tf.data.AUTOTUNE
+    train_ds = train_ds.prefetch(buffer_size=autotune)
+    val_ds = val_ds.prefetch(buffer_size=autotune)
+    test_ds = test_ds.prefetch(buffer_size=autotune)
 
-    print("\n2. Building MobileNetV2 Transfer Learning Model...")
-    model = build_model()
+    print("\n2. Building and compiling MobileNetV2 Transfer Learning model...")
+    model, base_model = build_model()
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=1e-4),
+        optimizer=keras.optimizers.Adam(learning_rate=1e-3),
         loss='categorical_crossentropy',
         metrics=['accuracy']
     )
@@ -131,15 +133,22 @@ def main():
 
     callbacks = [
         keras.callbacks.EarlyStopping(
-            monitor='val_loss',
+            monitor='val_accuracy',
             patience=5,
             restore_best_weights=True,
+            verbose=1
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=3,
+            min_lr=1e-6,
             verbose=1
         )
     ]
 
-    print("\n3. Training model...")
-    epochs = 20
+    epochs = 12
+    print(f"\n3. Training model for up to {epochs} epochs...")
     history = model.fit(
         train_ds,
         validation_data=val_ds,
@@ -147,93 +156,94 @@ def main():
         callbacks=callbacks
     )
 
-    print("\n4. Exporting training history curves...")
-    plt.figure(figsize=(12, 5))
-    
-    # Loss plot
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history['loss'], label='Train Loss', color='#2563eb', lw=2)
-    plt.plot(history.history['val_loss'], label='Val Loss', color='#dc2626', lw=2)
-    plt.title('Loss per Epoch')
-    plt.xlabel('Epoch')
-    plt.ylabel('Categorical Crossentropy')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    print(f"\n4. Saving trained model artifact to {MODEL_PATH}...")
+    model.save(MODEL_PATH)
 
-    # Accuracy plot
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history['accuracy'], label='Train Accuracy', color='#2563eb', lw=2)
-    plt.plot(history.history['val_accuracy'], label='Val Accuracy', color='#16a34a', lw=2)
-    plt.title('Accuracy per Epoch')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    print("\n5. Evaluating on independent Test Set (180 Real Photos)...")
+    test_loss, test_acc = model.evaluate(test_ds, verbose=1)
+    print(f"--> Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc * 100:.2f}%")
 
-    plt.tight_layout()
-    history_plot_path = EVALUATION_DIR / "training_history.png"
-    plt.savefig(history_plot_path, dpi=300)
-    plt.close()
-    print(f"Saved: {history_plot_path}")
-
-    print("\n5. Evaluating model on test set...")
-    # Collect predictions and true labels
+    # Generate predictions for classification report and confusion matrix
     y_true = []
-    y_pred = []
+    y_pred_probs = []
 
     for images, labels in test_ds:
         preds = model.predict(images, verbose=0)
         y_true.extend(np.argmax(labels.numpy(), axis=1))
-        y_pred.extend(np.argmax(preds, axis=1))
+        y_pred_probs.extend(preds)
 
     y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
+    y_pred = np.argmax(np.array(y_pred_probs), axis=1)
 
-    test_accuracy = float(np.mean(y_true == y_pred))
-    print(f"\n==========================================")
-    print(f"TEST ACCURACY: {test_accuracy * 100:.2f}%")
-    print(f"==========================================")
+    # Classification Report
+    report = classification_report(
+        y_true,
+        y_pred,
+        target_names=CLASS_NAMES,
+        digits=4
+    )
+    report_header = f"WASTE CLASSIFICATION REPORT (MobileNetV2 on Real-World Photos)\nTest Accuracy: {test_acc * 100:.2f}%\n\n"
+    full_report = report_header + report
+    print("\n" + full_report)
 
-    # Export Classification Report
-    target_names = ["Organic Waste", "Plastic Waste", "Paper Waste"]
-    report_text = classification_report(y_true, y_pred, target_names=target_names, digits=4)
     report_path = EVALUATION_DIR / "classification_report.txt"
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("WASTE CLASSIFICATION REPORT (MobileNetV2)\n")
-        f.write(f"Test Accuracy: {test_accuracy * 100:.2f}%\n\n")
-        f.write(report_text)
-    print(f"Saved: {report_path}")
-    print("\n" + report_text)
+    report_path.write_text(full_report, encoding="utf-8")
+    print(f"Saved classification report to {report_path}")
 
-    # Export Confusion Matrix
+    # Confusion Matrix
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(7, 6))
     sns.heatmap(
         cm,
         annot=True,
         fmt='d',
-        cmap='Blues',
-        xticklabels=target_names,
-        yticklabels=target_names,
-        cbar=True
+        cmap='Greens',
+        xticklabels=CLASS_NAMES,
+        yticklabels=CLASS_NAMES
     )
-    plt.title(f'Confusion Matrix (Test Accuracy: {test_accuracy * 100:.1f}%)')
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
+    plt.title(f'Confusion Matrix (Test Acc: {test_acc * 100:.2f}%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Actual Category')
+    plt.xlabel('Predicted Category')
     plt.tight_layout()
-    cm_plot_path = EVALUATION_DIR / "confusion_matrix.png"
-    plt.savefig(cm_plot_path, dpi=300)
+    cm_path = EVALUATION_DIR / "confusion_matrix.png"
+    plt.savefig(cm_path, dpi=200)
     plt.close()
-    print(f"Saved: {cm_plot_path}")
+    print(f"Saved confusion matrix plot to {cm_path}")
 
-    # Check target criteria >= 80%
-    if test_accuracy >= 0.80:
-        print("\nTarget passing criterion achieved (>= 80.0%)! Saving final model...")
-        model.save(str(MODEL_PATH))
-        print(f"Model saved successfully to: {MODEL_PATH}")
-    else:
-        print(f"\nWARNING: Test accuracy ({test_accuracy*100:.2f}%) did not reach 80.0% target.")
-        model.save(str(MODEL_PATH))
+    # Training History Plot
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(acc, label='Training Accuracy', color='#16a34a', linewidth=2)
+    plt.plot(val_acc, label='Validation Accuracy', color='#2563eb', linewidth=2)
+    plt.title('Training & Validation Accuracy', fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend(loc='lower right')
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(loss, label='Training Loss', color='#dc2626', linewidth=2)
+    plt.plot(val_loss, label='Validation Loss', color='#f59e0b', linewidth=2)
+    plt.title('Training & Validation Loss', fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend(loc='upper right')
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    hist_path = EVALUATION_DIR / "training_history.png"
+    plt.savefig(hist_path, dpi=200)
+    plt.close()
+    print(f"Saved training history plot to {hist_path}")
+
+    print("\n" + "=" * 60)
+    print("ALL TRAINING & EVALUATION TASKS COMPLETED SUCCESSFULLY!")
+    print("=" * 60)
 
 if __name__ == "__main__":
     main()
