@@ -129,6 +129,15 @@ Microservice berjalan secara independen pada port `8000`:
 
 ---
 
+## 🔑 Akun Demo Pengujian Ekosistem
+
+| Role | Username / Email | Password | Keterangan |
+| :--- | :--- | :--- | :--- |
+| **Admin** | `admin` | `12345678` | Akun Administrator Web Portal |
+| **Warga (User)** | `user` | `12345678` | Akun Warga Pelapor Mobile & Web |
+
+---
+
 ## 🧪 Pengujian Unit & Endpoint API
 
 Jalankan pengujian unit mandiri untuk memverifikasi model inferensi dan API endpoint:
